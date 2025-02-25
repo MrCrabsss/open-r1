@@ -1,17 +1,3 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """
 Supervised fine-tuning script for decoder language models.
 
@@ -46,19 +32,18 @@ from datasets import load_dataset
 from transformers import AutoTokenizer, set_seed
 from transformers.trainer_utils import get_last_checkpoint
 
-from open_r1.configs import SFTConfig
-from open_r1.utils.callbacks import get_callbacks
-from open_r1.utils.wandb_logging import init_wandb_training
+from src.open_r1.configs import SFTConfig
+from src.open_r1.utils.callbacks import get_callbacks
+from src.open_r1.utils.wandb_logging import init_wandb_training
+from src.open_r1.configs import ScriptArguments
 from trl import (
     ModelConfig,
-    ScriptArguments,
     SFTTrainer,
     TrlParser,
     get_kbit_device_map,
     get_peft_config,
     get_quantization_config,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +89,25 @@ def main(script_args, training_args, model_args):
     ################
     # Load datasets
     ################
-    dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
+    data_files = {"train": script_args.train_data_path}
+    if script_args.eval_data_path:
+        data_files["test"] = script_args.eval_data_path
 
+    dataset = load_dataset(
+        "parquet",
+        data_files=data_files,
+        # Auto-split if no eval data provided
+        split="train" if not script_args.eval_data_path else None
+    )
+
+    # If no eval data, split from train
+    if not script_args.eval_data_path and training_args.do_eval:
+        dataset = dataset.train_test_split(test_size=0.1, seed=42)
+        dataset = datasets.DatasetDict({
+            "train": dataset["train"],
+            "test": dataset["test"]
+    })
+    
     ################
     # Load tokenizer
     ################
@@ -141,7 +143,7 @@ def main(script_args, training_args, model_args):
         args=training_args,
         train_dataset=dataset[script_args.dataset_train_split],
         eval_dataset=dataset[script_args.dataset_test_split] if training_args.eval_strategy != "no" else None,
-        processing_class=tokenizer,
+        tokenizer=tokenizer,
         peft_config=get_peft_config(model_args),
         callbacks=get_callbacks(training_args, model_args),
     )
@@ -163,22 +165,11 @@ def main(script_args, training_args, model_args):
     trainer.save_state()
 
     ##################################
-    # Save model and create model card
+    # Save model
     ##################################
     logger.info("*** Save model ***")
     trainer.save_model(training_args.output_dir)
     logger.info(f"Model saved to {training_args.output_dir}")
-
-    # Save everything else on main process
-    kwargs = {
-        "dataset_name": script_args.dataset_name,
-        "tags": ["open-r1"],
-    }
-    if trainer.accelerator.is_main_process:
-        trainer.create_model_card(**kwargs)
-        # Restore k,v cache for fast inference
-        trainer.model.config.use_cache = True
-        trainer.model.config.save_pretrained(training_args.output_dir)
 
     ##########
     # Evaluate
@@ -189,14 +180,6 @@ def main(script_args, training_args, model_args):
         metrics["eval_samples"] = len(dataset[script_args.dataset_test_split])
         trainer.log_metrics("eval", metrics)
         trainer.save_metrics("eval", metrics)
-
-    #############
-    # push to hub
-    #############
-    if training_args.push_to_hub:
-        logger.info("Pushing to hub...")
-        trainer.push_to_hub(**kwargs)
-
 
 if __name__ == "__main__":
     parser = TrlParser((ScriptArguments, SFTConfig, ModelConfig))

@@ -14,8 +14,8 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from open_r1.utils.evaluation import SUPPORTED_BENCHMARKS, run_benchmark_jobs
-from open_r1.configs import SFTConfig
+from src.open_r1.utils.evaluation import SUPPORTED_BENCHMARKS, run_benchmark_jobs
+from src.open_r1.configs import SFTConfig
 from trl import ModelConfig, TrlParser
 
 

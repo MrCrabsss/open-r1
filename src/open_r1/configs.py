@@ -18,8 +18,24 @@ from typing import Optional
 
 import trl
 
+@dataclass
+class ScriptArguments:
+    train_data_path: str = field(
+        metadata={"help": "Path to training data Parquet file"}
+    )
+    eval_data_path: str = field(
+        default=None,
+        metadata={"help": "Path to evaluation data Parquet file (optional)"}
+    )
+    dataset_train_split: str = field(
+        default="train",
+        metadata={"help": "Name of the training split"}
+    )
+    dataset_test_split: str = field(
+        default="test",
+        metadata={"help": "Name of the test split"}
+    )
 
-# TODO: add the shared options with a mixin to reduce code duplication
 @dataclass
 class GRPOConfig(trl.GRPOConfig):
     """
